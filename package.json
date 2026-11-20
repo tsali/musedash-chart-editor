@@ -1,0 +1,14 @@
+{
+  "name": "musedash-chart-editor",
+  "version": "0.1.0",
+  "description": "A standalone visual chart/level editor for Muse Dash custom songs. Exports .mdm charts compatible with the CustomAlbums mod.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/roundtrip.mjs"
+  },
+  "keywords": ["muse-dash", "rhythm-game", "chart-editor", "bms", "customalbums", "mdmc"],
+  "engines": {
+    "node": ">=20"
+  }
+}

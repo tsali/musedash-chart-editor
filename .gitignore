@@ -1,0 +1,24 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# NEVER commit game assets or copyrighted content:
+global-metadata.dat
+GameAssembly.*
+*.mdm
+*.mdp
+*.ogg
+*.mp3
+*.wav
+*.dat
+sample-charts/
+
+# RE scratch / evidence exports (kept out of the public repo)
+rea-out/
+*.evidence.json
+
+# os / editor
+.DS_Store
+.vscode/
+*.log

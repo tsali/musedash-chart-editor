@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Muse Dash Chart Editor</title>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<style>
+  :root{
+    --bg:#0a0712; --panel:#150b24; --panel2:#1d1033; --line:#2c1b45; --line2:#3a2558;
+    --fg:#f4ecff; --muted:#a98fcf; --accent:#ff2d95; --accent2:#00e6ff;
+    --font:"Space Grotesk",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:
+      radial-gradient(1200px 600px at 80% -10%, #2a0f3f 0%, transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, #10233f 0%, transparent 55%),
+      var(--bg);
+    color:var(--fg);font-family:var(--font);
+    display:flex;flex-direction:column;min-height:100%;
+    padding-left:max(14px,env(safe-area-inset-left,0px));
+    padding-right:max(14px,env(safe-area-inset-right,0px));
+    padding-block:14px;gap:12px;
+  }
+  img{max-width:100%}
+  h1{font-size:19px;margin:0;letter-spacing:.3px;font-weight:700}
+  h1 .tag{color:var(--accent2);font-weight:500}
+  .sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .bar .grp{display:flex;gap:8px;align-items:center;min-width:0}
+  label.f{display:flex;flex-direction:column;gap:3px;font-size:10px;letter-spacing:.6px;
+    text-transform:uppercase;color:var(--muted)}
+  input,select{font-family:var(--font);background:#0e0819;color:var(--fg);
+    border:1px solid var(--line2);border-radius:8px;padding:6px 8px;font-size:13px;min-width:0}
+  input[type=number]{width:74px;font-variant-numeric:tabular-nums}
+  input[type=text]{width:140px}
+  input[type=file]{font-size:11px}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .palette{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
+    background:#0e0819;border:1px solid var(--line2);border-radius:999px;
+    padding:5px 11px 5px 7px;font-size:12.5px;font-weight:600;color:var(--fg);transition:.12s}
+  .chip:hover{border-color:var(--muted)}
+  .chip[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 14px #ff2d9566;background:#1b0e2b}
+  button{font-family:var(--font);cursor:pointer;background:#0e0819;color:var(--fg);
+    border:1px solid var(--line2);border-radius:9px;padding:7px 12px;font-size:13px;font-weight:600;transition:.12s}
+  button:hover{border-color:var(--muted)}
+  button.primary{background:linear-gradient(180deg,#ff3f9f,#d81f7d);border-color:#ff5cab;color:#fff;
+    box-shadow:0 4px 16px #ff2d9533}
+  button.cyan{background:linear-gradient(180deg,#19cfe6,#0f9fc0);border-color:#4fe6ff;color:#06222b}
+  button.ghost{background:transparent}
+  button:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+  .wrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .scroller{overflow-x:auto;overflow-y:hidden}
+  canvas{display:block;touch-action:none}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:11px;padding:2px 2px}
+  .legend b{color:var(--fg)}
+  .cols{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:900px){.cols{grid-template-columns:1fr 340px}}
+  .panel{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+    border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:9px;min-width:0}
+  .panel h2{font-size:12px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin:0}
+  textarea{width:100%;min-height:160px;resize:vertical;background:#070410;color:#d7ffe9;
+    border:1px solid var(--line2);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;line-height:1.5;white-space:pre}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .stat{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+  .stat b{color:var(--fg)}
+  .hint{color:var(--muted);font-size:11.5px;line-height:1.5}
+  kbd{font-family:var(--mono);background:#0e0819;border:1px solid var(--line2);border-bottom-width:2px;
+    border-radius:5px;padding:0 5px;font-size:11px;color:var(--fg)}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(20px);
+    background:#1b0e2b;border:1px solid var(--accent);color:#fff;padding:9px 16px;border-radius:10px;
+    font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:50;box-shadow:0 8px 30px #000a}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  a{color:var(--accent2)}
+</style>
+</head>
+<body>
+
+<h1>Muse&nbsp;Dash <span class="tag">Chart&nbsp;Editor</span></h1>
+<div class="sub">Two-lane beatmap editor — exports <b>.mdm</b> charts the CustomAlbums mod loads directly. Personal/offline use; keep custom charts off the official leaderboards.</div>
+
+<div class="bar" id="meta">
+  <label class="f">Title <input type="text" id="m_title" value="Neon Dash (demo)"></label>
+  <label class="f">Artist <input type="text" id="m_artist" value="You"></label>
+  <label class="f">Charter <input type="text" id="m_charter" value="You"></label>
+  <label class="f">BPM <input type="number" id="m_bpm" value="150" min="20" max="400" step="1"></label>
+  <label class="f">Scene
+    <select id="m_scene">
+      <option>scene_01</option><option>scene_02</option><option>scene_03</option>
+      <option>scene_04</option><option>scene_05</option><option>scene_06</option>
+      <option>scene_07</option><option selected>scene_08</option><option>scene_09</option>
+      <option>scene_10</option>
+    </select>
+  </label>
+  <label class="f">Difficulty
+    <select id="m_diff"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+  </label>
+  <label class="f">Level <input type="number" id="m_level" value="7" min="1" max="12" style="width:60px"></label>
+</div>
+
+<div class="bar">
+  <div class="grp"><span class="stat">Note</span><div class="palette" id="palette"></div></div>
+  <div class="grp">
+    <label class="f">Snap
+      <select id="snap">
+        <option value="4">1/4</option><option value="8" selected>1/8</option>
+        <option value="16">1/16</option><option value="3">1/3</option><option value="6">1/6</option>
+      </select>
+    </label>
+    <label class="f">Zoom
+      <select id="zoom"><option value="40">S</option><option value="64" selected>M</option><option value="96">L</option><option value="140">XL</option></select>
+    </label>
+    <label class="f">Bars <input type="number" id="bars" value="8" min="2" max="400" style="width:64px"></label>
+    <button class="ghost" id="clear">Clear</button>
+  </div>
+</div>
+
+<div class="cols">
+  <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+    <div class="wrap"><div class="scroller" id="scroller"><canvas id="cv"></canvas></div></div>
+    <div class="legend">
+      <span><b>Click</b> a lane to place · <b>click a note</b> to delete</span>
+      <span>Hold: click start then end · delete by clicking an end-dot</span>
+      <span>Collectibles can sit inside a hold</span>
+      <span><kbd>Esc</kbd> cancel hold</span>
+    </div>
+    <div class="bar">
+      <div class="grp">
+        <button class="primary" id="play">▶ Play demo</button>
+        <label class="f">Audio <input type="file" id="audio" accept="audio/*" style="width:130px"></label>
+        <label class="f">Offset s <input type="number" id="offset" value="0" step="0.01" style="width:66px"></label>
+      </div>
+      <div class="grp">
+        <span class="stat"><b id="st_notes">0</b> notes</span>
+        <span class="stat"><b id="st_len">0.0</b>s</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Export / Import</h2>
+    <div class="row">
+      <button class="cyan" id="dl_mdm">⬇ Export .mdm</button>
+      <button id="dl_bms">⬇ .bms</button>
+    </div>
+    <div class="row">
+      <label class="f">Open .mdm / .bms <input type="file" id="imp" accept=".mdm,.bms"></label>
+      <label class="f">Cover image <input type="file" id="cover" accept="image/*"></label>
+    </div>
+    <div class="hint" id="exphint">
+      <b>.mdm</b> = zip of <code>info.json</code> + <code>map{difficulty}.bms</code> + cover + your audio, loaded by
+      <a href="https://github.com/MDMods/CustomAlbums" target="_blank" rel="noopener">CustomAlbums</a>.
+      Drop the file in the mod's <code>Custom_Albums</code> folder. (Custom songs need the Muse&nbsp;Plus DLC.)
+    </div>
+    <h2 style="margin-top:4px">Live .bms</h2>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Muse Dash chart format — tables + codec.
+   Mirrors the tested Node codec in src/bms.mjs (round-trip verified).
+   Sources: CustomAlbums Data/Bms.cs (channels + ids) and the game's IL2CPP
+   metadata (note palette). No game assets are bundled.
+   ========================================================================== */
+const PALETTE=[
+  {key:'small', label:'Small',  id:'01', color:'#ff4d8d'},
+  {key:'large', label:'Large',  id:'0A', color:'#ff2d6f'},
+  {key:'raider',label:'Raider', id:'0C', color:'#ff9e3d'},
+  {key:'hammer',label:'Hammer', id:'0D', color:'#b36bff'},
+  {key:'gemini',label:'Gemini', id:'0E', color:'#3df0ff'},
+  {key:'hold',  label:'Hold',   id:'0F', color:'#4dffb0', hold:true},
+  {key:'gear',  label:'Gear',   id:'0H', color:'#ffe14d'},
+  {key:'music', label:'Music',  id:'10', color:'#ffd24d'},
+  {key:'heart', label:'Heart',  id:'22', color:'#ff5c7a'},
+];
+const BYID=Object.fromEntries(PALETTE.map(p=>[p.id,p]));
+const WRITE_CH={air:'11', ground:'12'};
+const NOTE_CH={'11':'air','13':'air','51':'air','53':'air','31':'air','33':'air','D1':'air','D3':'air',
+               '12':'ground','14':'ground','52':'ground','54':'ground','32':'ground','34':'ground','D2':'ground','D4':'ground'};
+const HOLD_IDS=new Set(['0F','0G']);
+const RES=48;
+
+const gcd=(a,b)=>{a=Math.abs(a);b=Math.abs(b);while(b){[a,b]=[b,a%b];}return a||1;};
+const lcm=(a,b)=>a/gcd(a,b)*b;
+const reduce=(a,b)=>{const g=gcd(a,b);return [a/g,b/g];};
+const m3=n=>String(n).padStart(3,'0');
+const beatOf=(measure,slot)=>measure*4+(slot/RES)*4;
+
+function serializeBms(){
+  const h=[`#PLAYER 1`,`#GENRE ${val('m_scene')}`,`#TITLE ${val('m_title')}`,
+    `#ARTIST ${val('m_artist')}`,`#LEVELDESIGN ${val('m_charter')}`,
+    `#PLAYLEVEL ${val('m_level')}`,`#BPM ${state.bpm}`,''];
+  const pts=[];
+  for(const n of state.notes){
+    const ch=WRITE_CH[n.lane];
+    pts.push({measure:n.measure,a:n.slot,b:RES,ch,id:n.id});
+    if(n.endMeasure!=null) pts.push({measure:n.endMeasure,a:n.endSlot,b:RES,ch,id:n.id});
+  }
+  const groups=new Map();
+  for(const p of pts){const k=`${p.measure}|${p.ch}`;(groups.get(k)||groups.set(k,[]).get(k)).push(p);}
+  const lines=[];
+  for(const [k,arr] of groups){
+    const [measure,ch]=k.split('|');
+    let D=1; for(const p of arr){const [,d]=reduce(p.a,p.b);D=lcm(D,d);}
+    const layers=[];
+    for(const p of arr){const [a,b]=reduce(p.a,p.b);const idx=a*(D/b);
+      let L=layers.find(L=>L[idx]==='00');if(!L){L=new Array(D).fill('00');layers.push(L);}L[idx]=p.id;}
+    for(const L of layers) lines.push(`#${m3(+measure)}${ch}:${L.join('')}`);
+  }
+  lines.sort();
+  return h.concat(lines).join('\n')+'\n';
+}
+function parseBms(text){
+  const headers={}; let bpm=120; const raw=[];
+  const dataRe=/^#(\d{3})(..):(.*)$/;
+  for(let line of text.split(/\r?\n/)){
+    line=line.trim(); if(!line.startsWith('#'))continue;
+    const m=dataRe.exec(line);
+    if(m){ const measure=+m[1]; const ch=m[2].toUpperCase(); const lane=NOTE_CH[ch];
+      if(!lane)continue; const data=m[3]; if(data.length%2)continue; const D=data.length/2;
+      for(let i=0;i<D;i++){const v=data.substr(i*2,2);if(v==='00')continue;raw.push({measure,a:i,b:D,ch,lane,id:v.toUpperCase()});}
+      continue; }
+    const sp=line.indexOf(' '); const key=(sp<0?line.slice(1):line.slice(1,sp)).toUpperCase();
+    const v=sp<0?'':line.slice(sp+1).trim();
+    if(key==='BPM')bpm=+v||bpm; else if(key==='GENRE')headers.scene=v;
+    else if(key==='TITLE')headers.title=v; else if(key==='ARTIST')headers.artist=v;
+    else if(key==='LEVELDESIGN')headers.charter=v; else if(key==='PLAYLEVEL')headers.level=v;
+  }
+  const notes=[]; const byCh=new Map();
+  for(const p of raw)(byCh.get(p.ch)||byCh.set(p.ch,[]).get(p.ch)).push(p);
+  for(const pts of byCh.values()){
+    pts.sort((x,y)=>(x.measure+x.a/x.b)-(y.measure+y.a/y.b));
+    const used=new Array(pts.length).fill(false);
+    for(let i=0;i<pts.length;i++){
+      if(used[i])continue; const p=pts[i]; const [num,den]=reduce(p.a,p.b);
+      const note={measure:p.measure,num,den,lane:p.lane,id:p.id};
+      if(HOLD_IDS.has(p.id)){ let j=-1; for(let k=i+1;k<pts.length;k++){if(!used[k]&&pts[k].id===p.id){j=k;break;}}
+        if(j>=0){used[j]=true;const q=pts[j];const [en,ed]=reduce(q.a,q.b);note.end={measure:q.measure,num:en,den:ed};} }
+      used[i]=true; notes.push(note);
+    }
+  }
+  return {headers,bpm,notes};
+}
+
+/* ============================ editor state ================================= */
+const state={ bpm:150, bars:8, snap:8, px:64, sel:'small', notes:[], pending:null };
+const val=id=>document.getElementById(id).value.trim();
+
+/* ============================ canvas ====================================== */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const scroller=document.getElementById('scroller');
+const RULER=28, LANE=92;
+let W=0,H=0,dpr=1, wave=null, waveDur=0;
+function layout(){
+  dpr=Math.min(window.devicePixelRatio||1,2);
+  const beats=state.bars*4;
+  W=Math.max(beats*state.px+40, scroller.clientWidth);
+  H=RULER+LANE*2;
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+const xOfBeat=b=>20+b*state.px;
+const beatOfX=x=>(x-20)/state.px;
+const laneTop=lane=>RULER+(lane==='air'?0:LANE);
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#120a1f'; ctx.fillRect(0,laneTop('air'),W,LANE);
+  ctx.fillStyle='#0d0a1a'; ctx.fillRect(0,laneTop('ground'),W,LANE);
+  ctx.fillStyle='rgba(25,182,214,.06)'; ctx.fillRect(0,laneTop('air'),W,LANE);
+  ctx.fillStyle='rgba(255,77,141,.06)'; ctx.fillRect(0,laneTop('ground'),W,LANE);
+  if(wave){ const off=parseFloat(val('offset'))||0; ctx.fillStyle='rgba(0,230,255,.11)';
+    for(let x=20;x<W;x++){ const t=off+beatOfX(x)*60/state.bpm; if(t<0||t>waveDur)continue;
+      const a=wave[Math.min(wave.length-1,Math.floor(t/waveDur*wave.length))];
+      const h=a*(LANE*1.7); ctx.fillRect(x,(RULER+LANE)-h/2,1,h); } }
+  const beats=state.bars*4, step=4/state.snap;
+  ctx.lineWidth=1;
+  for(let b=0;b<=beats+0.001;b+=step){
+    const x=xOfBeat(b); const isBeat=Math.abs(b-Math.round(b))<1e-6; const isBar=Math.abs(b%4)<1e-6;
+    ctx.strokeStyle=isBar?'#53367e':isBeat?'#33224d':'#241736';
+    ctx.beginPath();ctx.moveTo(x,RULER);ctx.lineTo(x,H);ctx.stroke();
+  }
+  ctx.strokeStyle='#3a2558';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(0,RULER+LANE);ctx.lineTo(W,RULER+LANE);ctx.stroke();
+  ctx.fillStyle='#0a0712';ctx.fillRect(0,0,W,RULER);
+  ctx.font='11px "Space Grotesk",sans-serif';ctx.textBaseline='middle';ctx.fillStyle='#c9b3ea';
+  for(let mm=0;mm<=state.bars;mm++){ctx.fillText(String(mm+1),xOfBeat(mm*4)+4,RULER/2);}
+  ctx.save();ctx.font='700 11px "Space Grotesk",sans-serif';
+  ctx.fillStyle='rgba(61,240,255,.7)';ctx.fillText('AIR',6,laneTop('air')+12);
+  ctx.fillStyle='rgba(255,77,141,.75)';ctx.fillText('GROUND',6,laneTop('ground')+12);ctx.restore();
+  for(const n of state.notes) drawNote(n);
+  if(state.pending){const p=state.pending;const x=xOfBeat(beatOf(p.measure,p.slot));const y=laneTop(p.lane)+LANE/2;
+    ctx.strokeStyle='#4dffb0';ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(x,y,11,0,7);ctx.stroke();ctx.setLineDash([]);}
+  if(transport.active){const x=xOfBeat(transport.beat);ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(x-5,0);ctx.lineTo(x+5,0);ctx.lineTo(x,7);ctx.fill();}
+}
+function drawNote(n){
+  const p=BYID[n.id]||{color:'#fff'}; const y=laneTop(n.lane)+LANE/2; const x=xOfBeat(beatOf(n.measure,n.slot));
+  if(n.endMeasure!=null){ const x2=xOfBeat(beatOf(n.endMeasure,n.endSlot));
+    ctx.save();ctx.shadowColor=p.color;ctx.shadowBlur=10;ctx.fillStyle=p.color+'44';ctx.strokeStyle=p.color;ctx.lineWidth=2.5;
+    roundRect(x,y-10,Math.max(x2-x,6),20,7);ctx.fill();ctx.stroke();ctx.restore();
+    glowDot(x,y,p.color,15);glowDot(x2,y,p.color,15);return; }
+  drawGlyph(ctx,n.id,x,y,22,p.color,true);
+}
+function glowDot(x,y,c,r=14){ctx.save();ctx.shadowColor=c;ctx.shadowBlur=10;ctx.fillStyle=c;ctx.beginPath();ctx.arc(x,y,r/2,0,7);ctx.fill();ctx.restore();}
+function gc(c,x,y,r){c.beginPath();c.arc(x,y,r,0,7);}
+function drawGlyph(c,id,x,y,s,color,glow){
+  c.save(); if(glow){c.shadowColor=color;c.shadowBlur=9;}
+  c.fillStyle=color;c.strokeStyle=color;c.lineWidth=Math.max(1.5,s*0.09);c.lineJoin='round';c.lineCap='round';
+  const r=s*0.5;
+  switch(id){
+    case '01': gc(c,x,y,r*0.82);c.fill(); break;
+    case '0A': gc(c,x,y,r*1.02);c.fill();c.save();c.shadowBlur=0;c.fillStyle='#0b0714';gc(c,x,y,r*0.56);c.fill();c.fillStyle=color;gc(c,x,y,r*0.30);c.fill();c.restore(); break;
+    case '0C': c.beginPath();c.moveTo(x-r*0.75,y-r*0.95);c.lineTo(x+r*0.95,y);c.lineTo(x-r*0.75,y+r*0.95);c.lineTo(x-r*0.28,y);c.closePath();c.fill(); break;
+    case '0D': c.beginPath();c.moveTo(x,y-r);c.lineTo(x+r*0.9,y);c.lineTo(x,y+r);c.lineTo(x-r*0.9,y);c.closePath();c.fill(); break;
+    case '0E': gc(c,x-r*0.52,y,r*0.6);c.fill();gc(c,x+r*0.52,y,r*0.6);c.fill(); break;
+    case '0H': gear(c,x,y,r); break;
+    case '10': musicGlyph(c,x,y,r); break;
+    case '22': heart(c,x,y,r*1.02); break;
+    default: gc(c,x,y,r*0.82);c.fill();
+  }
+  c.restore();
+}
+function gear(c,x,y,r){const t=8;c.beginPath();for(let i=0;i<t*2;i++){const a=i/(t*2)*Math.PI*2;const rr=i%2?r*0.66:r;c.lineTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);}c.closePath();c.fill();c.save();c.shadowBlur=0;c.fillStyle='#0b0714';gc(c,x,y,r*0.32);c.fill();c.restore();}
+function musicGlyph(c,x,y,r){c.save();c.lineWidth=r*0.3;c.beginPath();c.moveTo(x+r*0.42,y+r*0.35);c.lineTo(x+r*0.42,y-r*0.95);c.stroke();c.beginPath();c.moveTo(x+r*0.42,y-r*0.95);c.quadraticCurveTo(x+r*1.15,y-r*0.75,x+r*0.7,y-r*0.1);c.stroke();c.restore();c.save();c.translate(x-r*0.08,y+r*0.46);c.rotate(-0.35);c.beginPath();c.ellipse(0,0,r*0.52,r*0.38,0,0,7);c.fill();c.restore();}
+function heart(c,x,y,r){c.beginPath();c.moveTo(x,y+r*0.72);c.bezierCurveTo(x-r*1.18,y-r*0.18,x-r*0.5,y-r*0.95,x,y-r*0.28);c.bezierCurveTo(x+r*0.5,y-r*0.95,x+r*1.18,y-r*0.18,x,y+r*0.72);c.closePath();c.fill();}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+
+/* ============================ interaction ================================= */
+function snapAt(x){const beat=Math.max(0,beatOfX(x));let measure=Math.floor(beat/4);const inBeat=beat-measure*4;
+  const stepSlots=RES/state.snap;let slot=Math.round((inBeat/4*RES)/stepSlots)*stepSlots;if(slot>=RES){slot=0;measure++;}return {measure,slot};}
+function laneAtY(y){if(y<RULER)return null;if(y<RULER+LANE)return 'air';if(y<RULER+LANE*2)return 'ground';return null;}
+cv.addEventListener('pointerdown',e=>{
+  const r=cv.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
+  const lane=laneAtY(y);if(!lane)return;const {measure,slot}=snapAt(x);
+  const tap=state.notes.find(n=>n.endMeasure==null&&n.lane===lane&&n.measure===measure&&n.slot===slot);
+  const holdH=state.notes.find(n=>n.endMeasure!=null&&n.lane===lane&&((n.measure===measure&&n.slot===slot)||(n.endMeasure===measure&&n.endSlot===slot)));
+  const hit=tap||holdH;
+  if(hit){state.notes=state.notes.filter(n=>n!==hit);if(state.pending&&state.pending.lane===lane)state.pending=null;sync();return;}
+  const pal=PALETTE.find(p=>p.key===state.sel);
+  if(pal.hold){
+    if(state.pending&&state.pending.lane===lane){const s=state.pending;const bs=beatOf(s.measure,s.slot),be=beatOf(measure,slot);
+      if(be>bs){state.notes.push({lane,measure:s.measure,slot:s.slot,id:pal.id,endMeasure:measure,endSlot:slot});state.pending=null;}
+      else{state.pending={lane,measure,slot};}}
+    else{state.pending={lane,measure,slot};}
+    sync();return;
+  }
+  state.notes.push({lane,measure,slot,id:pal.id});sync();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){state.pending=null;draw();}});
+
+/* ============================ transport =================================== */
+let audioCtx=null, audioBuf=null, srcNode=null, master=null, noiseBuf=null, audioBytes=null, audioFile=null;
+const transport={active:false,beat:0,raf:0,startT:0};
+function ensureCtx(){
+  if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    master=audioCtx.createGain();master.gain.value=0.22;master.connect(audioCtx.destination);
+    const n=Math.floor(audioCtx.sampleRate);noiseBuf=audioCtx.createBuffer(1,n,audioCtx.sampleRate);
+    const d=noiseBuf.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;}
+  if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx;
+}
+const midi=m=>440*Math.pow(2,(m-69)/12);
+function tone(time,freq,dur,type,gain,glideTo){const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,time);if(glideTo)o.frequency.exponentialRampToValueAtTime(glideTo,time+dur);
+  g.gain.setValueAtTime(0.0001,time);g.gain.exponentialRampToValueAtTime(gain,time+0.006);g.gain.exponentialRampToValueAtTime(0.0001,time+dur);
+  o.connect(g);g.connect(master);o.start(time);o.stop(time+dur+0.03);}
+function noise(time,dur,gain,hp){const s=audioCtx.createBufferSource();s.buffer=noiseBuf;
+  const f=audioCtx.createBiquadFilter();f.type='highpass';f.frequency.value=hp;
+  const g=audioCtx.createGain();g.gain.setValueAtTime(gain,time);g.gain.exponentialRampToValueAtTime(0.0001,time+dur);
+  s.connect(f);f.connect(g);g.connect(master);s.start(time);s.stop(time+dur+0.03);}
+const kick=t=>tone(t,140,0.26,'sine',0.8,45);
+const snare=t=>{noise(t,0.17,0.45,1400);tone(t,180,0.11,'triangle',0.2,120);};
+const hat=(t,d)=>noise(t,d,0.14,7000);
+const BASS=[45,45,41,43,48,48,41,43];
+const LEAD=[69,-1,72,76,-1,72,-1,69,72,-1,74,-1,76,-1,79,-1];
+const synth={on:false,step:0,nextTime:0,timer:0};
+function scheduleStep(step,time){const bar=Math.floor(step/16)%8,s=step%16;
+  if(s%4===0)kick(time);if(s===4||s===12)snare(time);if(s%2===0)hat(time,s%4===0?0.05:0.03);
+  if(s%2===0)tone(time,midi(BASS[bar]),0.17,'sawtooth',0.26);
+  const n=LEAD[s];if(n>=0){const oct=(bar>=4&&bar<6)?12:0;tone(time,midi(n+oct),0.13,'square',0.15);}}
+function synthLoop(){if(!synth.on)return;const sec=(60/state.bpm)/4;
+  while(synth.nextTime<audioCtx.currentTime+0.12){scheduleStep(synth.step,synth.nextTime);synth.nextTime+=sec;synth.step++;}
+  synth.timer=setTimeout(synthLoop,25);}
+document.getElementById('audio').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;audioFile=f;
+  try{audioBytes=new Uint8Array(await f.arrayBuffer());ensureCtx();
+    audioBuf=await audioCtx.decodeAudioData(audioBytes.slice().buffer);buildWave(audioBuf);
+    document.getElementById('play').textContent='▶ Play';toast('Audio loaded');draw();}
+  catch(err){toast('Could not decode that audio');}
+});
+function buildWave(buf){const data=buf.getChannelData(0);const N=3000;wave=new Float32Array(N);
+  const block=Math.max(1,Math.floor(data.length/N));
+  for(let i=0;i<N;i++){let peak=0;const s=i*block;for(let j=0;j<block;j+=48){const v=Math.abs(data[s+j]||0);if(v>peak)peak=v;}wave[i]=peak;}
+  waveDur=buf.duration;}
+document.getElementById('play').addEventListener('click',()=>transport.active?stop():play());
+function play(){
+  ensureCtx();transport.active=true;document.getElementById('play').textContent='■ Stop';
+  const offset=parseFloat(val('offset'))||0;
+  if(audioBuf){srcNode=audioCtx.createBufferSource();srcNode.buffer=audioBuf;srcNode.connect(audioCtx.destination);
+    srcNode.start(0, Math.max(0,offset));transport.startT=audioCtx.currentTime-Math.max(0,offset);}
+  else{synth.on=true;synth.step=0;synth.nextTime=audioCtx.currentTime+0.08;transport.startT=synth.nextTime;synthLoop();}
+  const loop=()=>{if(!transport.active)return;
+    const t=audioCtx.currentTime-transport.startT-(audioBuf?offset:0);
+    transport.beat=Math.max(0,t*state.bpm/60);
+    if(transport.beat>state.bars*4+0.5){stop();return;}
+    autoScroll();draw();transport.raf=requestAnimationFrame(loop);};
+  transport.raf=requestAnimationFrame(loop);
+}
+function stop(){transport.active=false;synth.on=false;clearTimeout(synth.timer);
+  document.getElementById('play').textContent=audioBuf?'▶ Play':'▶ Play demo';
+  cancelAnimationFrame(transport.raf);if(srcNode){try{srcNode.stop();}catch(e){}srcNode=null;}draw();}
+function autoScroll(){const x=xOfBeat(transport.beat);const left=scroller.scrollLeft,w=scroller.clientWidth;
+  if(x<left+80||x>left+w-80)scroller.scrollLeft=x-w*0.3;}
+
+/* ============================ export / import ============================= */
+let coverBytes=null;
+function buildInfo(){
+  const diff=+val('m_diff'),lvl=val('m_level')||'1';const d={};
+  for(let i=1;i<=5;i++)d['difficulty'+i]=(i===diff)?String(lvl):'0';
+  return {name:val('m_title'),author:val('m_artist'),bpm:String(state.bpm),scene:val('m_scene'),
+    levelDesigner:val('m_charter'),searchTags:[], ...d};
+}
+const enc=new TextEncoder(), dec=new TextDecoder();
+const safe=s=>(s||'chart').replace(/[^\w\-]+/g,'_').slice(0,50)||'chart';
+function download(bytes,name,mime){const blob=new Blob([bytes],{type:mime||'application/octet-stream'});
+  const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
+document.getElementById('dl_bms').addEventListener('click',()=>{
+  download(enc.encode(serializeBms()),`map${val('m_diff')}.bms`,'text/plain');});
+document.getElementById('dl_mdm').addEventListener('click',()=>{
+  if(typeof fflate==='undefined'){toast('Zip library still loading — try again');return;}
+  const diff=val('m_diff');const files={};
+  files['info.json']=enc.encode(JSON.stringify(buildInfo(),null,2));
+  files[`map${diff}.bms`]=enc.encode(serializeBms());
+  if(coverBytes)files['cover.png']=coverBytes;
+  if(audioBytes&&audioFile){const ext=(audioFile.name.split('.').pop()||'ogg').toLowerCase();files['music.'+ext]=audioBytes;}
+  const zip=fflate.zipSync(files,{level:6});
+  download(zip,safe(val('m_title'))+'.mdm','application/zip');
+  toast('Exported '+safe(val('m_title'))+'.mdm');
+});
+document.getElementById('cover').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  coverBytes=new Uint8Array(await f.arrayBuffer());toast('Cover set');});
+document.getElementById('imp').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  try{await importFile(f);toast('Imported '+f.name);}catch(err){toast('Import failed: '+err.message);}e.target.value='';});
+async function importFile(file){
+  const buf=new Uint8Array(await file.arrayBuffer());
+  if(file.name.toLowerCase().endsWith('.mdm')){
+    const z=fflate.unzipSync(buf);
+    if(z['info.json']){applyInfo(JSON.parse(dec.decode(z['info.json'])));}
+    const mk=Object.keys(z).find(k=>/^map\d\.bms$/i.test(k));
+    if(mk)loadBmsText(dec.decode(z[mk])); else throw new Error('no map*.bms in .mdm');
+  } else { loadBmsText(dec.decode(buf)); }
+}
+function applyInfo(info){
+  if(info.name)document.getElementById('m_title').value=info.name;
+  if(info.author)document.getElementById('m_artist').value=info.author;
+  if(info.levelDesigner)document.getElementById('m_charter').value=info.levelDesigner;
+  if(info.bpm){const b=parseFloat(info.bpm);if(b>0){state.bpm=b;document.getElementById('m_bpm').value=b;}}
+  if(info.scene)setSel('m_scene',info.scene);
+  for(let i=5;i>=1;i--){if(info['difficulty'+i]&&info['difficulty'+i]!=='0'){setSel('m_diff',String(i));document.getElementById('m_level').value=info['difficulty'+i];}}
+}
+function loadBmsText(text){
+  const chart=parseBms(text);
+  if(chart.bpm>0){state.bpm=chart.bpm;document.getElementById('m_bpm').value=chart.bpm;}
+  if(chart.headers.scene)setSel('m_scene',chart.headers.scene);
+  if(chart.headers.title)document.getElementById('m_title').value=chart.headers.title;
+  if(chart.headers.artist)document.getElementById('m_artist').value=chart.headers.artist;
+  if(chart.headers.charter)document.getElementById('m_charter').value=chart.headers.charter;
+  if(chart.headers.level)document.getElementById('m_level').value=chart.headers.level;
+  state.notes=chart.notes.map(n=>{const slot=Math.round(n.num*RES/n.den);
+    const o={lane:n.lane,measure:n.measure,slot,id:n.id};
+    if(n.end)Object.assign(o,{endMeasure:n.end.measure,endSlot:Math.round(n.end.num*RES/n.end.den)});return o;});
+  const maxM=state.notes.reduce((m,n)=>Math.max(m,n.endMeasure??n.measure),0);
+  state.bars=Math.max(4,maxM+1);document.getElementById('bars').value=state.bars;
+  state.pending=null;layout();sync();
+}
+function setSel(id,v){const s=document.getElementById(id);if([...s.options].some(o=>o.value===v))s.value=v;}
+
+/* ============================ palette + wiring ============================ */
+const palEl=document.getElementById('palette');
+PALETTE.forEach(p=>{
+  const b=document.createElement('button');b.className='chip';b.type='button';b.setAttribute('aria-pressed',p.key===state.sel);
+  const ic=document.createElement('canvas');ic.width=36;ic.height=36;ic.style.width='18px';ic.style.height='18px';
+  const g=ic.getContext('2d');g.scale(2,2);
+  if(p.hold){g.strokeStyle=p.color;g.fillStyle=p.color;g.lineWidth=3;g.lineCap='round';
+    g.beginPath();g.moveTo(4,9);g.lineTo(14,9);g.stroke();g.beginPath();g.arc(4,9,2.4,0,7);g.fill();g.beginPath();g.arc(14,9,2.4,0,7);g.fill();}
+  else drawGlyph(g,p.id,9,9,17,p.color,false);
+  const lbl=document.createElement('span');lbl.textContent=p.label;b.append(ic,lbl);
+  b.onclick=()=>{state.sel=p.key;state.pending=null;[...palEl.children].forEach(c=>c.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true');draw();};
+  palEl.appendChild(b);
+});
+document.getElementById('m_bpm').addEventListener('input',e=>{const v=+e.target.value;if(v>0){state.bpm=v;sync();}});
+document.getElementById('snap').addEventListener('change',e=>{state.snap=+e.target.value;draw();});
+document.getElementById('zoom').addEventListener('change',e=>{state.px=+e.target.value;layout();draw();});
+document.getElementById('bars').addEventListener('input',e=>{const v=Math.max(2,Math.min(400,+e.target.value||8));state.bars=v;layout();sync();});
+['m_title','m_artist','m_charter','m_scene','m_level'].forEach(id=>document.getElementById(id).addEventListener('input',updateOut));
+document.getElementById('clear').addEventListener('click',()=>{if(state.notes.length){state.notes=[];state.pending=null;sync();toast('Cleared');}});
+document.getElementById('offset').addEventListener('input',draw);
+
+function updateOut(){document.getElementById('out').value=serializeBms();}
+function updateStats(){document.getElementById('st_notes').textContent=state.notes.length;
+  document.getElementById('st_len').textContent=((state.bars*4)/state.bpm*60).toFixed(1);}
+function sync(){layoutIfNeeded();draw();updateOut();updateStats();}
+let lastBars=-1,lastPx=-1;
+function layoutIfNeeded(){if(state.bars!==lastBars||state.px!==lastPx){layout();lastBars=state.bars;lastPx=state.px;}}
+let toastT=0;
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1700);}
+
+/* ============================ demo seed =================================== */
+function seed(){
+  const put={};const set=(lane,m,s,id)=>put[`${lane}:${m}:${s}`]={lane,measure:m,slot:s,id};
+  for(let m=0;m<8;m++){for(const s of [0,12,24,36])set('ground',m,s,'01');if(m!==5)for(const s of [12,36])set('air',m,s,'01');}
+  for(const m of [3,7])for(const s of [0,3,6,9,12])set('ground',m,s,'10');
+  for(const m of [0,4]){set('air',m,0,'0E');set('ground',m,0,'0E');}
+  set('air',2,24,'0A');set('air',6,24,'0A');set('air',1,36,'0C');
+  state.notes=Object.values(put);
+  state.notes.push({lane:'air',measure:5,slot:0,id:'0F',endMeasure:5,endSlot:36});
+  state.notes.push({lane:'air',measure:5,slot:12,id:'10'});
+  state.notes.push({lane:'air',measure:5,slot:24,id:'22'});
+}
+window.addEventListener('resize',()=>{layout();draw();});
+seed();layout();lastBars=state.bars;lastPx=state.px;sync();
+</script>
+</body>
+</html>
