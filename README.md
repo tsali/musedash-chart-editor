@@ -6,8 +6,9 @@ beatmap on a two-lane (air / ground) timeline synced to your audio, then export 
 mod loads directly — no engine patching, no game files redistributed.
 
 > Status: **working build.** The visual editor (`index.html`) runs in any browser —
-> two-lane timeline, note palette, audio + waveform, and real `.mdm` / `.bms`
-> export & import. See [docs/FORMAT.md](docs/FORMAT.md) for the full format spec.
+> two-lane timeline, note palette, audio + waveform, **audio auto-charting**
+> (tempo + onset detection), and real `.mdm` / `.bms` export & import.
+> See [docs/FORMAT.md](docs/FORMAT.md) for the full format spec.
 
 **▶ Live editor: <https://tsali.github.io/musedash-chart-editor/>** (or open `index.html` locally — no build step).
 
@@ -33,6 +34,7 @@ Muse-Dash-aware visual editor** that stays fully compatible with the existing
 - [x] `.mdm` zip packager + `info.json` writer
 - [x] Import an existing `.mdm` / `.bms` to edit
 - [x] Web UI: two-lane timeline, BPM grid, note palette, audio + waveform, demo-song playback
+- [x] Audio auto-chart: tempo + onset detection → grid-snapped starter map (then edit by hand)
 - [x] Publish as a static site (GitHub Pages)
 - [ ] Confirm audio entry name + `.mdp` packs against a real `.mdm`
 - [ ] `.talk` dialog events, boss-phase helpers

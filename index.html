@@ -127,7 +127,8 @@
     <div class="legend">
       <span><b>Click</b> a lane to place · <b>click a note</b> to delete</span>
       <span>Hold: click start then end · delete by clicking an end-dot</span>
-      <span>Collectibles can sit inside a hold</span>
+      <span>Only collectibles (Heart/Music/Gear) fit inside a hold · holds can't overlap</span>
+      <span>Load audio → <b>✨ Auto-chart</b> for a starter map</span>
       <span><kbd>Esc</kbd> cancel hold</span>
     </div>
     <div class="bar">
@@ -135,6 +136,12 @@
         <button class="primary" id="play">▶ Play demo</button>
         <label class="f">Audio <input type="file" id="audio" accept="audio/*" style="width:130px"></label>
         <label class="f">Offset s <input type="number" id="offset" value="0" step="0.01" style="width:66px"></label>
+      </div>
+      <div class="grp">
+        <button class="cyan" id="autochart" disabled title="Detect tempo + note onsets from the loaded audio and lay down a starter chart you can edit">✨ Auto-chart</button>
+        <label class="f">Density
+          <select id="density"><option value="sparse">Sparse</option><option value="normal" selected>Normal</option><option value="dense">Dense</option></select>
+        </label>
       </div>
       <div class="grp">
         <span class="stat"><b id="st_notes">0</b> notes</span>
@@ -189,6 +196,7 @@ const WRITE_CH={air:'11', ground:'12'};
 const NOTE_CH={'11':'air','13':'air','51':'air','53':'air','31':'air','33':'air','D1':'air','D3':'air',
                '12':'ground','14':'ground','52':'ground','54':'ground','32':'ground','34':'ground','D2':'ground','D4':'ground'};
 const HOLD_IDS=new Set(['0F','0G']);
+const ATTACK=new Set(['01','0A','0C','0D','0E']); // small, large, raider, hammer, gemini — need a free hand to hit
 const RES=48;
 
 const gcd=(a,b)=>{a=Math.abs(a);b=Math.abs(b);while(b){[a,b]=[b,a%b];}return a||1;};
@@ -349,15 +357,25 @@ cv.addEventListener('pointerdown',e=>{
   const hit=tap||holdH;
   if(hit){state.notes=state.notes.filter(n=>n!==hit);if(state.pending&&state.pending.lane===lane)state.pending=null;sync();return;}
   const pal=PALETTE.find(p=>p.key===state.sel);
+  const beat=beatOf(measure,slot);
   if(pal.hold){
-    if(state.pending&&state.pending.lane===lane){const s=state.pending;const bs=beatOf(s.measure,s.slot),be=beatOf(measure,slot);
-      if(be>bs){state.notes.push({lane,measure:s.measure,slot:s.slot,id:pal.id,endMeasure:measure,endSlot:slot});state.pending=null;}
+    if(holdSpanAt(lane,beat)){toast('A hold already covers that spot');return;}
+    if(state.pending&&state.pending.lane===lane){const s=state.pending;const bs=beatOf(s.measure,s.slot),be=beat;
+      if(be>bs){
+        if(overlapsHold(lane,bs,be)){toast("Holds can't overlap on the same lane");return;}
+        state.notes.push({lane,measure:s.measure,slot:s.slot,id:pal.id,endMeasure:measure,endSlot:slot});state.pending=null;}
       else{state.pending={lane,measure,slot};}}
     else{state.pending={lane,measure,slot};}
     sync();return;
   }
+  if(ATTACK.has(pal.id)&&holdSpanAt(lane,beat)){toast('Only collectibles (Heart/Music/Gear) can sit inside a hold');return;}
   state.notes.push({lane,measure,slot,id:pal.id});sync();
 });
+// a hold on `lane` whose span strictly contains `beat` (its own endpoints are handled by the delete hit-test first)
+function holdSpanAt(lane,beat){return state.notes.find(n=>n.endMeasure!=null&&n.lane===lane&&
+  beatOf(n.measure,n.slot)-1e-6<=beat&&beat<=beatOf(n.endMeasure,n.endSlot)+1e-6);}
+function overlapsHold(lane,bs,be){return state.notes.some(n=>n.endMeasure!=null&&n.lane===lane&&
+  bs<=beatOf(n.endMeasure,n.endSlot)+1e-6&&beatOf(n.measure,n.slot)-1e-6<=be);}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){state.pending=null;draw();}});
 
 /* ============================ transport =================================== */
@@ -396,7 +414,7 @@ document.getElementById('audio').addEventListener('change',async e=>{
   const f=e.target.files[0];if(!f)return;audioFile=f;
   try{audioBytes=new Uint8Array(await f.arrayBuffer());ensureCtx();
     audioBuf=await audioCtx.decodeAudioData(audioBytes.slice().buffer);buildWave(audioBuf);
-    document.getElementById('play').textContent='▶ Play';toast('Audio loaded');draw();}
+    document.getElementById('play').textContent='▶ Play';document.getElementById('autochart').disabled=false;toast('Audio loaded — try ✨ Auto-chart');draw();}
   catch(err){toast('Could not decode that audio');}
 });
 function buildWave(buf){const data=buf.getChannelData(0);const N=3000;wave=new Float32Array(N);
@@ -516,6 +534,106 @@ let lastBars=-1,lastPx=-1;
 function layoutIfNeeded(){if(state.bars!==lastBars||state.px!==lastPx){layout();lastBars=state.bars;lastPx=state.px;}}
 let toastT=0;
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),1700);}
+
+/* ============================ auto-chart (tempo + onset detection) =========
+   Decodes the loaded audio and lays down a grid-snapped starter chart:
+   - tempo from a spectral-flux onset envelope + autocorrelation (70-200 BPM)
+   - onsets from spectral-flux peak-picking with an adaptive local threshold
+   - beat phase -> Offset; onsets quantized to the current Snap grid
+   - lane by frequency balance (bass-heavy -> ground, treble -> air)
+   It drops Small notes you then refine by hand. Pure Web Audio + JS, no deps.
+   ========================================================================== */
+function _fft(re,im){ // in-place iterative radix-2 FFT, length = power of 2
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;
+    if(i<j){const tr=re[i];re[i]=re[j];re[j]=tr;const ti=im[i];im[i]=im[j];im[j]=ti;}}
+  for(let len=2;len<=n;len<<=1){const ang=-2*Math.PI/len,wr=Math.cos(ang),wi=Math.sin(ang),h=len>>1;
+    for(let i=0;i<n;i+=len){let cr=1,ci=0;
+      for(let k=0;k<h;k++){const a=i+k,b=a+h;
+        const tr=re[b]*cr-im[b]*ci,ti=re[b]*ci+im[b]*cr;
+        re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti;
+        const ncr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=ncr;}}}
+}
+function analyzeAudio(buf){
+  const FFT=1024,HOP=512,sr=buf.sampleRate,nch=buf.numberOfChannels,len=buf.length;
+  const mono=new Float32Array(len);
+  for(let c=0;c<nch;c++){const d=buf.getChannelData(c);for(let i=0;i<len;i++)mono[i]+=d[i];}
+  if(nch>1)for(let i=0;i<len;i++)mono[i]/=nch;
+  const frames=Math.max(0,Math.floor((len-FFT)/HOP));
+  const flux=new Float32Array(frames),loE=new Float32Array(frames),hiE=new Float32Array(frames);
+  const win=new Float32Array(FFT);for(let i=0;i<FFT;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(FFT-1));
+  const re=new Float32Array(FFT),im=new Float32Array(FFT),prev=new Float32Array(FFT>>1);
+  const loBin=Math.max(1,Math.floor(250*FFT/sr)),hiBin=Math.floor(2500*FFT/sr),half=FFT>>1;
+  for(let f=0;f<frames;f++){const s=f*HOP;
+    for(let i=0;i<FFT;i++){re[i]=mono[s+i]*win[i];im[i]=0;}
+    _fft(re,im);
+    let fl=0,lo=0,hi=0;
+    for(let k=0;k<half;k++){const mag=Math.sqrt(re[k]*re[k]+im[k]*im[k]);
+      const d=mag-prev[k];if(d>0)fl+=d;prev[k]=mag;
+      if(k<loBin)lo+=mag;else if(k>hiBin)hi+=mag;}
+    flux[f]=fl;loE[f]=lo;hiE[f]=hi;}
+  return {frames,sr,HOP,flux,loE,hiE};
+}
+function detectTempo(a){
+  const {frames,sr,HOP,flux}=a,fr=sr/HOP;
+  let mean=0;for(let i=0;i<frames;i++)mean+=flux[i];mean/=(frames||1);
+  const env=new Float32Array(frames);for(let i=0;i<frames;i++)env[i]=Math.max(0,flux[i]-mean);
+  const acf=L=>{let s=0;for(let i=0;i+L<frames;i++)s+=env[i]*env[i+L];return s;};
+  let best=-1,bpm=120;
+  for(let b=70;b<=200;b+=0.5){const lag=60/b*fr,l0=Math.floor(lag),fc=lag-l0;
+    const sc=(acf(l0)*(1-fc)+acf(l0+1)*fc)*(0.85+0.25*Math.exp(-0.5*Math.pow((b-125)/55,2)));
+    if(sc>best){best=sc;bpm=b;}}
+  return {bpm:Math.round(bpm),env,fr};
+}
+function pickOnsets(a,env,sens){
+  const {frames,sr,HOP,loE,hiE}=a;
+  const P=({sparse:[1.6,0.17],normal:[1.35,0.11],dense:[1.15,0.075]})[sens]||[1.35,0.11];
+  const mult=P[0],minGap=P[1],WIN=8;
+  let mx=0;for(let i=0;i<frames;i++)if(env[i]>mx)mx=env[i];
+  const out=[];if(mx<=0)return out;let last=-1e9;
+  for(let f=2;f<frames-2;f++){const e=env[f];
+    if(e<mx*0.04)continue;
+    if(!(e>=env[f-1]&&e>env[f+1]&&e>=env[f-2]&&e>=env[f+2]))continue;
+    let s=0,c=0;for(let k=f-WIN;k<=f+WIN;k++){if(k<0||k>=frames)continue;s+=env[k];c++;}
+    if(e<(s/c)*mult)continue;
+    const t=f*HOP/sr;if(t-last<minGap)continue;last=t;
+    out.push({t,f,lo:loE[f],hi:hiE[f]});}
+  return out;
+}
+function autoChart(){
+  if(!audioBuf){toast('Load an audio file first');return;}
+  toast('Analyzing audio…');
+  setTimeout(()=>{try{
+    const a=analyzeAudio(audioBuf);
+    if(!a.frames){toast('Audio too short to analyze');return;}
+    const {bpm,env}=detectTempo(a);
+    const onsets=pickOnsets(a,env,document.getElementById('density').value);
+    if(!onsets.length){toast('No clear onsets found — try a different track');return;}
+    const Tb=60/bpm;let vr=0,vi=0; // beat phase from onset times (vector / circular mean)
+    for(const o of onsets){const w=o.lo+o.hi+1e-9,ang=2*Math.PI*((o.t%Tb)/Tb);vr+=w*Math.cos(ang);vi+=w*Math.sin(ang);}
+    let phi=Math.atan2(vi,vr)/(2*Math.PI)*Tb;if(phi<0)phi+=Tb;
+    const offset=+phi.toFixed(3);
+    const stepSlots=RES/state.snap,seen=new Set(),notes=[];let alt=0;
+    for(const o of onsets){let beat=(o.t-offset)*bpm/60;if(beat<-1e-3)continue;
+      let measure=Math.floor(beat/4),inb=beat-measure*4;
+      let slot=Math.round(inb/4*RES/stepSlots)*stepSlots;
+      if(slot>=RES){slot-=RES;measure++;}
+      const ratio=o.lo/(o.lo+o.hi+1e-9);
+      const lane=ratio>0.55?'ground':ratio<0.45?'air':((alt++&1)?'air':'ground');
+      const key=lane+':'+measure+':'+slot;if(seen.has(key))continue;seen.add(key);
+      notes.push({lane,measure,slot,id:'01'});
+      if(notes.length>=3000)break;}
+    notes.sort((x,y)=>beatOf(x.measure,x.slot)-beatOf(y.measure,y.slot));
+    state.bpm=Math.max(20,Math.min(400,bpm));
+    document.getElementById('m_bpm').value=state.bpm;
+    document.getElementById('offset').value=offset;
+    const maxM=notes.reduce((m,n)=>Math.max(m,n.measure),0);
+    state.bars=Math.max(4,Math.min(400,maxM+1));document.getElementById('bars').value=state.bars;
+    state.notes=notes;state.pending=null;layout();sync();
+    toast('Auto-chart: '+state.bpm+' BPM · '+notes.length+' notes — now edit away');
+  }catch(err){toast('Auto-chart failed: '+err.message);}},40);
+}
+document.getElementById('autochart').addEventListener('click',autoChart);
 
 /* ============================ demo seed =================================== */
 function seed(){
