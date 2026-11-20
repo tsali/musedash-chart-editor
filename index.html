@@ -128,7 +128,7 @@
       <span><b>Click</b> a lane to place · <b>click a note</b> to delete</span>
       <span>Hold: click start then end · delete by clicking an end-dot</span>
       <span>Only collectibles (Heart/Music/Gear) fit inside a hold · holds can't overlap</span>
-      <span>Load audio → <b>✨ Auto-chart</b> for a starter map</span>
+      <span>Load audio → <b>✨ Auto-chart</b> (Replace = fresh · Merge = add to your chart)</span>
       <span><kbd>Esc</kbd> cancel hold</span>
     </div>
     <div class="bar">
@@ -141,6 +141,9 @@
         <button class="cyan" id="autochart" disabled title="Detect tempo + note onsets from the loaded audio and lay down a starter chart you can edit">✨ Auto-chart</button>
         <label class="f">Density
           <select id="density"><option value="sparse">Sparse</option><option value="normal" selected>Normal</option><option value="dense">Dense</option></select>
+        </label>
+        <label class="f">On run
+          <select id="automode" title="Replace wipes current notes and re-detects BPM. Merge keeps your notes + current grid and only adds non-colliding notes."><option value="replace" selected>Replace</option><option value="merge">Merge</option></select>
         </label>
       </div>
       <div class="grp">
@@ -602,29 +605,43 @@ function pickOnsets(a,env,sens){
 }
 function autoChart(){
   if(!audioBuf){toast('Load an audio file first');return;}
+  const mode=document.getElementById('automode').value; // 'replace' | 'merge'
   toast('Analyzing audio…');
   setTimeout(()=>{try{
     const a=analyzeAudio(audioBuf);
     if(!a.frames){toast('Audio too short to analyze');return;}
-    const {bpm,env}=detectTempo(a);
+    const det=detectTempo(a), env=det.env;
     const onsets=pickOnsets(a,env,document.getElementById('density').value);
     if(!onsets.length){toast('No clear onsets found — try a different track');return;}
-    const Tb=60/bpm;let vr=0,vi=0; // beat phase from onset times (vector / circular mean)
-    for(const o of onsets){const w=o.lo+o.hi+1e-9,ang=2*Math.PI*((o.t%Tb)/Tb);vr+=w*Math.cos(ang);vi+=w*Math.sin(ang);}
-    let phi=Math.atan2(vi,vr)/(2*Math.PI)*Tb;if(phi<0)phi+=Tb;
-    const offset=+phi.toFixed(3);
+    // Replace: use detected BPM + a beat-phase offset. Merge: keep the existing grid so added notes line up.
+    let bpm, offset;
+    if(mode==='merge'){
+      bpm=state.bpm||det.bpm; offset=parseFloat(val('offset'))||0;
+    } else {
+      bpm=det.bpm; const Tb=60/bpm; let vr=0,vi=0; // beat phase (vector / circular mean of onset times)
+      for(const o of onsets){const w=o.lo+o.hi+1e-9,ang=2*Math.PI*((o.t%Tb)/Tb);vr+=w*Math.cos(ang);vi+=w*Math.sin(ang);}
+      let phi=Math.atan2(vi,vr)/(2*Math.PI)*Tb;if(phi<0)phi+=Tb; offset=+phi.toFixed(3);
+    }
     const stepBeats=4/state.snap, fr=a.sr/a.HOP, frames=a.frames, amp=a.amp;
     for(const o of onsets)o.s=env[o.f]; // onset strength (spectral-flux novelty)
     const sortNum=(x,y)=>x-y;
     const ss=onsets.map(o=>o.s).sort(sortNum), los=onsets.map(o=>o.lo).sort(sortNum), his=onsets.map(o=>o.hi).sort(sortNum);
     const pct=(arr,f)=>arr.length?arr[Math.max(0,Math.min(arr.length-1,Math.floor(f*arr.length)))]:0;
     const sBig=pct(ss,0.85), sHuge=pct(ss,0.93), loMed=pct(los,0.5), hiMed=pct(his,0.5);
-    const seen=new Set(), notes=[], holds=[]; let alt=0;
+    // Merge seeds the collision guards + note list from the existing chart; Replace starts empty.
+    const base = mode==='merge' ? state.notes : [];
+    const seen=new Set(), notes=base.slice(), holds=[]; let alt=0, added=0;
+    for(const n of base){seen.add(n.lane+':'+n.measure+':'+n.slot);
+      if(n.endMeasure!=null)holds.push({lane:n.lane,bs:beatOf(n.measure,n.slot),be:beatOf(n.endMeasure,n.endSlot)});}
     const snapBeat=t=>{let b=(t-offset)*bpm/60;if(b<0)b=0;return Math.round(b/stepBeats)*stepBeats;};
     const beatToMS=beat=>{let m=Math.floor(beat/4+1e-9);let slot=Math.round((beat-m*4)/4*RES);while(slot>=RES){slot-=RES;m++;}return {measure:m,slot};};
     const inHold=(lane,beat)=>holds.some(h=>h.lane===lane&&h.bs-1e-6<=beat&&beat<=h.be+1e-6);
+    // a proposed hold span is blocked if an existing hold overlaps it, or an attack note sits inside it (collectibles are fine)
+    const spanBlocked=(lane,bs,be)=>notes.some(n=>{if(n.lane!==lane)return false;
+      const nb=beatOf(n.measure,n.slot),nbe=n.endMeasure!=null?beatOf(n.endMeasure,n.endSlot):nb;
+      if(!(bs<nbe+1e-6&&nb-1e-6<be))return false; return n.endMeasure!=null||ATTACK.has(n.id);});
     const put=(lane,m,slot,id,em,es)=>{const key=lane+':'+m+':'+slot;if(seen.has(key))return false;seen.add(key);
-      const n={lane,measure:m,slot,id};if(em!=null){n.endMeasure=em;n.endSlot=es;}notes.push(n);return true;};
+      const n={lane,measure:m,slot,id};if(em!=null){n.endMeasure=em;n.endSlot=es;}notes.push(n);added++;return true;};
     for(let i=0;i<onsets.length;i++){
       const o=onsets[i], nextT=(i+1<onsets.length)?onsets[i+1].t:o.t+10, gap=nextT-o.t;
       const ratio=o.lo/(o.lo+o.hi+1e-9);
@@ -637,7 +654,7 @@ function autoChart(){
       const sustain=(ef-o.f)/fr;
       if(sustain>=0.33 && gap>=0.42){
         let eb=snapBeat(Math.min(o.t+sustain,nextT-0.05)); if(eb<=sb)eb=sb+stepBeats;
-        if(eb>sb && !inHold(lane,eb)){const em=beatToMS(eb);
+        if(eb>sb && !spanBlocked(lane,sb,eb)){const em=beatToMS(eb);
           if(put(lane,measure,slot,'0F',em.measure,em.slot)){holds.push({lane,bs:sb,be:eb});continue;}}
       }
       // Gemini: strong broadband accent with both lanes free
@@ -653,16 +670,21 @@ function autoChart(){
       if(notes.length>=3000)break;
     }
     notes.sort((x,y)=>beatOf(x.measure,x.slot)-beatOf(y.measure,y.slot));
-    state.bpm=Math.max(20,Math.min(400,bpm));
-    document.getElementById('m_bpm').value=state.bpm;
-    document.getElementById('offset').value=offset;
-    const maxM=notes.reduce((m,n)=>Math.max(m,n.measure),0);
+    if(mode!=='merge'){ // only Replace rewrites the tempo/offset fields
+      state.bpm=Math.max(20,Math.min(400,bpm));
+      document.getElementById('m_bpm').value=state.bpm;
+      document.getElementById('offset').value=offset;
+    }
+    const maxM=notes.reduce((m,n)=>Math.max(m,n.endMeasure??n.measure),0);
     state.bars=Math.max(4,Math.min(400,maxM+1));document.getElementById('bars').value=state.bars;
     state.notes=notes;state.pending=null;layout();sync();
     const tally={'0A':0,'0D':0,'0E':0,'0F':0};for(const n of notes)if(n.id in tally)tally[n.id]++;
     const extra=[];if(tally['0A'])extra.push(tally['0A']+' large');if(tally['0D'])extra.push(tally['0D']+' hammer');
     if(tally['0E'])extra.push((tally['0E']/2|0)+' gemini');if(tally['0F'])extra.push(tally['0F']+' hold');
-    toast('Auto-chart: '+state.bpm+' BPM · '+notes.length+' notes'+(extra.length?' ('+extra.join(', ')+')':'')+' — edit away');
+    const msg = mode==='merge'
+      ? 'Merged +'+added+' notes (total '+notes.length+')'
+      : 'Auto-chart: '+state.bpm+' BPM · '+notes.length+' notes'+(extra.length?' ('+extra.join(', ')+')':'');
+    toast(msg+' — edit away');
   }catch(err){toast('Auto-chart failed: '+err.message);}},40);
 }
 document.getElementById('autochart').addEventListener('click',autoChart);
