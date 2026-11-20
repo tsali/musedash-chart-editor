@@ -7,8 +7,9 @@ mod loads directly — no engine patching, no game files redistributed.
 
 > Status: **working build.** The visual editor (`index.html`) runs in any browser —
 > two-lane timeline, note palette, audio + waveform, and real `.mdm` / `.bms`
-> export & import. Open `index.html` locally, or deploy it to GitHub Pages.
-> See [docs/FORMAT.md](docs/FORMAT.md) for the full format spec.
+> export & import. See [docs/FORMAT.md](docs/FORMAT.md) for the full format spec.
+
+**▶ Live editor: <https://tsali.github.io/musedash-chart-editor/>** (or open `index.html` locally — no build step).
 
 ## Why
 
@@ -32,7 +33,7 @@ Muse-Dash-aware visual editor** that stays fully compatible with the existing
 - [x] `.mdm` zip packager + `info.json` writer
 - [x] Import an existing `.mdm` / `.bms` to edit
 - [x] Web UI: two-lane timeline, BPM grid, note palette, audio + waveform, demo-song playback
-- [ ] Publish as a static site (GitHub Pages)
+- [x] Publish as a static site (GitHub Pages)
 - [ ] Confirm audio entry name + `.mdp` packs against a real `.mdm`
 - [ ] `.talk` dialog events, boss-phase helpers
 
