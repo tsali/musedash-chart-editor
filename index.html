@@ -560,19 +560,19 @@ function analyzeAudio(buf){
   for(let c=0;c<nch;c++){const d=buf.getChannelData(c);for(let i=0;i<len;i++)mono[i]+=d[i];}
   if(nch>1)for(let i=0;i<len;i++)mono[i]/=nch;
   const frames=Math.max(0,Math.floor((len-FFT)/HOP));
-  const flux=new Float32Array(frames),loE=new Float32Array(frames),hiE=new Float32Array(frames);
+  const flux=new Float32Array(frames),loE=new Float32Array(frames),hiE=new Float32Array(frames),amp=new Float32Array(frames);
   const win=new Float32Array(FFT);for(let i=0;i<FFT;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(FFT-1));
   const re=new Float32Array(FFT),im=new Float32Array(FFT),prev=new Float32Array(FFT>>1);
   const loBin=Math.max(1,Math.floor(250*FFT/sr)),hiBin=Math.floor(2500*FFT/sr),half=FFT>>1;
   for(let f=0;f<frames;f++){const s=f*HOP;
     for(let i=0;i<FFT;i++){re[i]=mono[s+i]*win[i];im[i]=0;}
     _fft(re,im);
-    let fl=0,lo=0,hi=0;
+    let fl=0,lo=0,hi=0,tot=0;
     for(let k=0;k<half;k++){const mag=Math.sqrt(re[k]*re[k]+im[k]*im[k]);
-      const d=mag-prev[k];if(d>0)fl+=d;prev[k]=mag;
+      const d=mag-prev[k];if(d>0)fl+=d;prev[k]=mag;tot+=mag;
       if(k<loBin)lo+=mag;else if(k>hiBin)hi+=mag;}
-    flux[f]=fl;loE[f]=lo;hiE[f]=hi;}
-  return {frames,sr,HOP,flux,loE,hiE};
+    flux[f]=fl;loE[f]=lo;hiE[f]=hi;amp[f]=tot;}
+  return {frames,sr,HOP,flux,loE,hiE,amp};
 }
 function detectTempo(a){
   const {frames,sr,HOP,flux}=a,fr=sr/HOP;
@@ -613,16 +613,45 @@ function autoChart(){
     for(const o of onsets){const w=o.lo+o.hi+1e-9,ang=2*Math.PI*((o.t%Tb)/Tb);vr+=w*Math.cos(ang);vi+=w*Math.sin(ang);}
     let phi=Math.atan2(vi,vr)/(2*Math.PI)*Tb;if(phi<0)phi+=Tb;
     const offset=+phi.toFixed(3);
-    const stepSlots=RES/state.snap,seen=new Set(),notes=[];let alt=0;
-    for(const o of onsets){let beat=(o.t-offset)*bpm/60;if(beat<-1e-3)continue;
-      let measure=Math.floor(beat/4),inb=beat-measure*4;
-      let slot=Math.round(inb/4*RES/stepSlots)*stepSlots;
-      if(slot>=RES){slot-=RES;measure++;}
+    const stepBeats=4/state.snap, fr=a.sr/a.HOP, frames=a.frames, amp=a.amp;
+    for(const o of onsets)o.s=env[o.f]; // onset strength (spectral-flux novelty)
+    const sortNum=(x,y)=>x-y;
+    const ss=onsets.map(o=>o.s).sort(sortNum), los=onsets.map(o=>o.lo).sort(sortNum), his=onsets.map(o=>o.hi).sort(sortNum);
+    const pct=(arr,f)=>arr.length?arr[Math.max(0,Math.min(arr.length-1,Math.floor(f*arr.length)))]:0;
+    const sBig=pct(ss,0.85), sHuge=pct(ss,0.93), loMed=pct(los,0.5), hiMed=pct(his,0.5);
+    const seen=new Set(), notes=[], holds=[]; let alt=0;
+    const snapBeat=t=>{let b=(t-offset)*bpm/60;if(b<0)b=0;return Math.round(b/stepBeats)*stepBeats;};
+    const beatToMS=beat=>{let m=Math.floor(beat/4+1e-9);let slot=Math.round((beat-m*4)/4*RES);while(slot>=RES){slot-=RES;m++;}return {measure:m,slot};};
+    const inHold=(lane,beat)=>holds.some(h=>h.lane===lane&&h.bs-1e-6<=beat&&beat<=h.be+1e-6);
+    const put=(lane,m,slot,id,em,es)=>{const key=lane+':'+m+':'+slot;if(seen.has(key))return false;seen.add(key);
+      const n={lane,measure:m,slot,id};if(em!=null){n.endMeasure=em;n.endSlot=es;}notes.push(n);return true;};
+    for(let i=0;i<onsets.length;i++){
+      const o=onsets[i], nextT=(i+1<onsets.length)?onsets[i+1].t:o.t+10, gap=nextT-o.t;
       const ratio=o.lo/(o.lo+o.hi+1e-9);
-      const lane=ratio>0.55?'ground':ratio<0.45?'air':((alt++&1)?'air':'ground');
-      const key=lane+':'+measure+':'+slot;if(seen.has(key))continue;seen.add(key);
-      notes.push({lane,measure,slot,id:'01'});
-      if(notes.length>=3000)break;}
+      const lane=ratio>0.56?'ground':ratio<0.44?'air':((alt++&1)?'air':'ground');
+      const sb=snapBeat(o.t), {measure,slot}=beatToMS(sb);
+      if(inHold(lane,sb))continue; // nothing lands inside an existing hold on that lane
+      // Hold: sustained energy after the onset + room before the next hit
+      const thr=amp[o.f]*0.45; let ef=o.f;
+      while(ef+1<frames && amp[ef+1]>thr && (ef-o.f)/fr<2.0) ef++;
+      const sustain=(ef-o.f)/fr;
+      if(sustain>=0.33 && gap>=0.42){
+        let eb=snapBeat(Math.min(o.t+sustain,nextT-0.05)); if(eb<=sb)eb=sb+stepBeats;
+        if(eb>sb && !inHold(lane,eb)){const em=beatToMS(eb);
+          if(put(lane,measure,slot,'0F',em.measure,em.slot)){holds.push({lane,bs:sb,be:eb});continue;}}
+      }
+      // Gemini: strong broadband accent with both lanes free
+      if(o.s>=sBig && o.lo>loMed*1.15 && o.hi>hiMed*1.15 && ratio>0.38 && ratio<0.62
+         && !inHold('air',sb) && !inHold('ground',sb)){
+        const ok=put('air',measure,slot,'0E'); put('ground',measure,slot,'0E'); if(ok)continue;
+      }
+      // Size by strength: Hammer (huge, bass-dominant) > Large (accent) > Small
+      let id='01';
+      if(o.s>=sHuge && ratio>0.58) id='0D';
+      else if(o.s>=sBig) id='0A';
+      put(lane,measure,slot,id);
+      if(notes.length>=3000)break;
+    }
     notes.sort((x,y)=>beatOf(x.measure,x.slot)-beatOf(y.measure,y.slot));
     state.bpm=Math.max(20,Math.min(400,bpm));
     document.getElementById('m_bpm').value=state.bpm;
@@ -630,7 +659,10 @@ function autoChart(){
     const maxM=notes.reduce((m,n)=>Math.max(m,n.measure),0);
     state.bars=Math.max(4,Math.min(400,maxM+1));document.getElementById('bars').value=state.bars;
     state.notes=notes;state.pending=null;layout();sync();
-    toast('Auto-chart: '+state.bpm+' BPM · '+notes.length+' notes — now edit away');
+    const tally={'0A':0,'0D':0,'0E':0,'0F':0};for(const n of notes)if(n.id in tally)tally[n.id]++;
+    const extra=[];if(tally['0A'])extra.push(tally['0A']+' large');if(tally['0D'])extra.push(tally['0D']+' hammer');
+    if(tally['0E'])extra.push((tally['0E']/2|0)+' gemini');if(tally['0F'])extra.push(tally['0F']+' hold');
+    toast('Auto-chart: '+state.bpm+' BPM · '+notes.length+' notes'+(extra.length?' ('+extra.join(', ')+')':'')+' — edit away');
   }catch(err){toast('Auto-chart failed: '+err.message);}},40);
 }
 document.getElementById('autochart').addEventListener('click',autoChart);
